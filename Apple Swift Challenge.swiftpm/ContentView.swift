@@ -6,6 +6,8 @@ struct ContentView: View {
     var body: some View {
         Group {
             switch model.currentScreen {
+            case .hero:
+                HeroView(model: model)
             case .home:
                 HomeView(model: model)
             case .confirm:

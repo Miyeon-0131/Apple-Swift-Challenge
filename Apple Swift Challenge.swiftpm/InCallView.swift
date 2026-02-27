@@ -5,77 +5,172 @@ struct InCallView: View {
     var model: AppModel
     @State private var elapsed: TimeInterval = 0
     @State private var isConnected = false
-
+    @State private var showEndingMessage = false
+    @State private var connectTask: Task<Void, Never>? = nil
+    
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
+    
     var body: some View {
         if let call = model.currentCall {
-            VStack(spacing: 24) {
-                if isConnected {
-                    Text(formatDuration(elapsed))
-                        .font(.system(size: 54, weight: .light, design: .monospaced))
-                        .foregroundStyle(.primary)
-                        .accessibilityLabel(model.strings.callDurationLabel + " " + formatDuration(elapsed))
-                } else {
-                    Text(model.strings.connectingLabel)
-                        .font(.system(size: 34, weight: .bold))
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                if call.contact.category == .family {
-                    HeartbeatView(contact: call.contact, model: model)
-                } else if call.contact.category == .systemEmergency {
-                    EmergencyCallView(contact: call.contact, model: model)
-                } else {
-                    SimpleCallView(contact: call.contact)
-                }
-
-                Text(model.strings.contactDisplayName(for: call.contact))
-                    .font(.system(size: 44, weight: .bold))
-
-                Spacer()
-
-                Button(action: {
-                    withAnimation { model.endCall() }
-                }) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "phone.down.fill")
-                            .font(.title)
-                        Text(model.strings.hangUpButton)
-                            .font(.system(size: 32, weight: .bold))
+            ZStack(alignment: .topTrailing) {
+                VStack(spacing: 24) {
+                    if !showEndingMessage {
+                        if isConnected {
+                            Text(formatDuration(elapsed))
+                                .font(.system(size: 58, weight: .light, design: .monospaced))
+                                .foregroundStyle(.primary)
+                                .accessibilityLabel("Call duration: \(formatDurationForVoiceOver(elapsed))")
+                        } else {
+                            Text("Connecting…")
+                                .font(.system(size: 40, weight: .bold, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel("Connecting to \(call.contact.displayName)")
+                        }
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-                    .background(.red)
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    
+                    Spacer()
+                    
+                    // Different animations based on contact type
+                    if call.contact.category == .family {
+                        HeartbeatView(contact: call.contact, model: model)
+                    } else if call.contact.category == .systemEmergency {
+                        EmergencyCallView(contact: call.contact, model: model)
+                    } else {
+                        SimpleCallView(contact: call.contact)
+                    }
+                    
+                    Text(call.contact.displayName)
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .foregroundColor(.black)
+                        .accessibilityLabel("Calling \(call.contact.displayName)")
+
+                    // Demo text between avatar and hang-up
+                    Text("Demo mode — calls are simulated")
+                        .font(.title.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .accessibilityLabel("Demo mode. Calls are simulated.")
+
+                    Spacer()
+
+                    // Hang up button - minimum 44x44 touch target
+                    Button(action: {
+                        // Immediately stop any pending connect and reset connected state
+                        connectTask?.cancel()
+                        connectTask = nil
+                        isConnected = false
+                        withAnimation { 
+                            showEndingMessage = true
+                        }
+                        announce("Call ended")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            withAnimation {
+                                model.endCall()
+                            }
+                        }
+                    }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "phone.down.fill")
+                                .font(.system(size: 30))
+                            Text("Hang Up")
+                                .font(.system(size: 34, weight: .bold, design: .rounded))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 64)
+                        .background(.red)
+                        .foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                    }
+                    .accessibilityLabel("Hang up call with \(call.contact.displayName)")
+                    .accessibilityHint("Tap to end the call")
                 }
-                .accessibilityLabel(model.strings.hangUpButton)
-            }
-            .padding(32)
-            .onReceive(timer) { _ in
-                if isConnected {
-                    elapsed = Date().timeIntervalSince(call.startDate)
+                .padding(32)
+                .onReceive(timer) { _ in
+                    if isConnected {
+                        elapsed = Date().timeIntervalSince(call.startDate)
+                    }
                 }
-            }
-            .onAppear {
-                if call.contact.category == .family {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                .onAppear {
+                    if call.contact.category == .family {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    }
+                    announce("Calling \(call.contact.displayName)")
+                    // Start a cancellable connect task
+                    connectTask?.cancel()
+                    connectTask = Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        if Task.isCancelled { return }
+                        await MainActor.run {
+                            withAnimation { isConnected = true }
+                            announce("Connected to \(call.contact.displayName)")
+                        }
+                    }
                 }
-            }
-            .task {
-                try? await Task.sleep(for: .seconds(2))
-                withAnimation { isConnected = true }
+                .onDisappear {
+                    connectTask?.cancel()
+                    connectTask = nil
+                }
+                
+                // Emotional ending message overlay
+                if showEndingMessage {
+                    ZStack {
+                        Color.black.opacity(0.4)
+                            .ignoresSafeArea()
+                        
+                        VStack(spacing: 20) {
+                            Image(systemName: "heart.circle.fill")
+                                .font(.system(size: 80))
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        colors: [.orange, .pink],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                            
+                            Text(call.contact.category == .family 
+                                 ? "Every call she makes\nis a moment she's not alone."
+                                 : "Help is always just\none tap away.")
+                                .font(.system(size: 28, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .multilineTextAlignment(.center)
+                                .lineSpacing(8)
+                        }
+                        .padding(40)
+                        .background(
+                            RoundedRectangle(cornerRadius: 24)
+                                .fill(.ultraThinMaterial)
+                        )
+                        .padding(40)
+                    }
+                    .transition(.scale.combined(with: .opacity))
+                    .accessibilityLabel(call.contact.category == .family 
+                        ? "Every call she makes is a moment she's not alone"
+                        : "Help is always just one tap away")
+                }
             }
         }
     }
-
+    
     private func formatDuration(_ interval: TimeInterval) -> String {
         let minutes = Int(interval) / 60
         let seconds = Int(interval) % 60
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+    
+    private func formatDurationForVoiceOver(_ interval: TimeInterval) -> String {
+        let minutes = Int(interval) / 60
+        let seconds = Int(interval) % 60
+        if minutes == 0 {
+            return "\(seconds) seconds"
+        } else if seconds == 0 {
+            return "\(minutes) minutes"
+        } else {
+            return "\(minutes) minutes and \(seconds) seconds"
+        }
+    }
+
+    private func announce(_ text: String) {
+        SpeechAssistant.shared.speak(text)
     }
 }
 
@@ -91,10 +186,10 @@ struct HeartbeatView: View {
     @State private var ambientGlow1 = false
     @State private var ambientGlow2 = false
     @State private var ambientGlow3 = false
-
+    
     var body: some View {
         ZStack {
-            // Ambient volumetric lighting - outer glow
+            // Ambient volumetric lighting
             Circle()
                 .fill(
                     RadialGradient(
@@ -113,7 +208,6 @@ struct HeartbeatView: View {
                 .opacity(ambientGlow1 ? 0.3 : 0.6)
                 .blur(radius: 20)
             
-            // Mid-range soft glow
             Circle()
                 .fill(
                     RadialGradient(
@@ -132,7 +226,6 @@ struct HeartbeatView: View {
                 .opacity(ambientGlow2 ? 0.4 : 0.7)
                 .blur(radius: 15)
             
-            // Inner warm glow
             Circle()
                 .fill(
                     RadialGradient(
@@ -150,10 +243,9 @@ struct HeartbeatView: View {
                 .scaleEffect(ambientGlow3 ? 1.1 : 0.9)
                 .opacity(ambientGlow3 ? 0.5 : 0.8)
                 .blur(radius: 10)
- 
+            
             // 3D Frosted Glass Heart
             ZStack {
-                // Heart shadow for depth
                 Image(systemName: "heart.fill")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -162,7 +254,6 @@ struct HeartbeatView: View {
                     .blur(radius: 8)
                     .offset(y: 8)
                 
-                // Main frosted glass heart with gradient
                 Image(systemName: "heart.fill")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -170,9 +261,9 @@ struct HeartbeatView: View {
                     .foregroundStyle(
                         LinearGradient(
                             colors: [
-                                Color(red: 1.0, green: 0.4, blue: 0.5),  // Warm pink
-                                Color(red: 1.0, green: 0.6, blue: 0.4),  // Soft orange
-                                Color(red: 1.0, green: 0.5, blue: 0.6)   // Light pink
+                                Color(red: 1.0, green: 0.4, blue: 0.5),
+                                Color(red: 1.0, green: 0.6, blue: 0.4),
+                                Color(red: 1.0, green: 0.5, blue: 0.6)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -182,7 +273,6 @@ struct HeartbeatView: View {
                     .shadow(color: .pink.opacity(0.3), radius: 20, x: 0, y: 10)
                     .shadow(color: .orange.opacity(0.2), radius: 30, x: 0, y: 15)
                 
-                // Frosted glass overlay effect
                 Image(systemName: "heart.fill")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -200,7 +290,6 @@ struct HeartbeatView: View {
                     )
                     .blur(radius: 1)
                 
-                // Shimmer highlight
                 Image(systemName: "heart.fill")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -216,8 +305,8 @@ struct HeartbeatView: View {
                         )
                     )
                     .blur(radius: 2)
-
-                // Avatar in center with frosted background
+                
+                // Avatar in center
                 Circle()
                     .fill(.ultraThinMaterial)
                     .frame(width: 150, height: 150)
@@ -243,6 +332,10 @@ struct HeartbeatView: View {
                                 .scaledToFill()
                                 .frame(width: 140, height: 140)
                                 .clipShape(Circle())
+                                .animation(nil, value: contact.avatarImageData)
+                                .animation(nil, value: isFloating)
+                                .animation(nil, value: isGlowing)
+                                .animation(nil, value: heartbeatScale)
                         } else if let emoji = contact.defaultEmoji {
                             Text(emoji)
                                 .font(.system(size: 96))
@@ -267,27 +360,22 @@ struct HeartbeatView: View {
             )
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(model.strings.connectingLabel + " " + model.strings.contactDisplayName(for: contact))
+        .accessibilityLabel("Calling \(contact.displayName). Animated heart showing connection and care.")
         .onAppear {
-            // Realistic heartbeat animation (lub-dub pattern)
             animateHeartbeat()
             
-            // Gentle floating animation
             withAnimation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true)) {
                 isFloating = true
             }
             
-            // Soft glow pulsing
             withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
                 isGlowing = true
             }
             
-            // Subtle 3D rotation
             withAnimation(.linear(duration: 8.0).repeatForever(autoreverses: false)) {
                 rotationAngle = 5
             }
             
-            // Ambient glow animations
             withAnimation(.easeInOut(duration: 3.0).repeatForever(autoreverses: true)) {
                 ambientGlow1 = true
             }
@@ -300,9 +388,7 @@ struct HeartbeatView: View {
         }
     }
     
-    // Realistic heartbeat animation with slower, calmer lub-dub pattern (50 BPM)
     private func animateHeartbeat() {
-        // First beat (lub) - stronger
         withAnimation(.easeIn(duration: 0.2)) {
             heartbeatScale = 1.12
         }
@@ -312,7 +398,6 @@ struct HeartbeatView: View {
                 heartbeatScale = 1.0
             }
             
-            // Second beat (dub) - slightly weaker
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 withAnimation(.easeIn(duration: 0.16)) {
                     heartbeatScale = 1.08
@@ -323,7 +408,6 @@ struct HeartbeatView: View {
                         heartbeatScale = 1.0
                     }
                     
-                    // Longer pause for calmer rhythm (50 BPM)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.68) {
                         animateHeartbeat()
                     }
@@ -333,7 +417,7 @@ struct HeartbeatView: View {
     }
 }
 
-// MARK: - Emergency Call View (System Emergency only)
+// MARK: - Emergency Call View
 
 struct EmergencyCallView: View {
     let contact: Contact
@@ -343,10 +427,9 @@ struct EmergencyCallView: View {
     @State private var flashAlert2 = false
     @State private var flashAlert3 = false
     @State private var rotateWarning: Double = 0
-
+    
     var body: some View {
         ZStack {
-            // Urgent flashing alert rings
             Circle()
                 .stroke(Color.red.opacity(0.4), lineWidth: 4)
                 .frame(width: 320, height: 320)
@@ -365,7 +448,6 @@ struct EmergencyCallView: View {
                 .scaleEffect(flashAlert3 ? 1.6 : 1.0)
                 .opacity(flashAlert3 ? 0 : 0.6)
             
-            // Urgent red glow background
             Circle()
                 .fill(
                     RadialGradient(
@@ -382,9 +464,7 @@ struct EmergencyCallView: View {
                 .frame(width: 360, height: 360)
                 .blur(radius: 20)
             
-            // Main emergency icon with intense pulsing
             ZStack {
-                // Warning background circle
                 Circle()
                     .fill(
                         LinearGradient(
@@ -400,13 +480,11 @@ struct EmergencyCallView: View {
                     .shadow(color: .red.opacity(0.6), radius: 30, x: 0, y: 10)
                     .shadow(color: .red.opacity(0.4), radius: 50, x: 0, y: 20)
                 
-                // Rotating warning stripes effect
                 Circle()
                     .stroke(Color.white.opacity(0.2), lineWidth: 2)
                     .frame(width: 220, height: 220)
                     .rotationEffect(.degrees(rotateWarning))
                 
-                // Emergency icon
                 Image(systemName: contact.iconName)
                     .font(.system(size: 90, weight: .bold))
                     .foregroundStyle(.white)
@@ -415,14 +493,12 @@ struct EmergencyCallView: View {
             .scaleEffect(urgentPulse ? 1.15 : 1.0)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(model.strings.connectingLabel + " " + model.strings.contactDisplayName(for: contact))
+        .accessibilityLabel("Emergency call to \(contact.displayName). Urgent alert animation showing immediate help is being contacted.")
         .onAppear {
-            // Rapid urgent pulsing (fast heartbeat under stress)
             withAnimation(.easeInOut(duration: 0.4).repeatForever(autoreverses: true)) {
                 urgentPulse = true
             }
             
-            // Fast flashing alert rings
             withAnimation(.easeOut(duration: 0.8).repeatForever(autoreverses: false)) {
                 flashAlert1 = true
             }
@@ -433,7 +509,6 @@ struct EmergencyCallView: View {
                 flashAlert3 = true
             }
             
-            // Rotating warning effect
             withAnimation(.linear(duration: 3.0).repeatForever(autoreverses: false)) {
                 rotateWarning = 360
             }
@@ -441,24 +516,41 @@ struct EmergencyCallView: View {
     }
 }
 
-// MARK: - Simple Call View (Non-family)
+// MARK: - Simple Call View
 
 struct SimpleCallView: View {
     let contact: Contact
     @State private var isPulsing = false
-
+    
     var body: some View {
         ZStack {
             Circle()
                 .fill(contact.iconColor.opacity(0.15))
-                .frame(width: 180, height: 180)
+                .frame(width: 220, height: 220)
                 .scaleEffect(isPulsing ? 1.05 : 0.95)
-
-            Image(systemName: contact.iconName)
-                .font(.system(size: 60))
-                .foregroundStyle(contact.iconColor)
+            
+            if let data = contact.avatarImageData,
+               let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 160, height: 160)
+                    .clipShape(Circle())
+            } else if let emoji = contact.defaultEmoji {
+                Circle()
+                    .fill(contact.iconColor.opacity(0.2))
+                    .frame(width: 180, height: 180)
+                    .overlay {
+                        Text(emoji)
+                            .font(.system(size: 90))
+                    }
+            } else {
+                Image(systemName: contact.iconName)
+                    .font(.system(size: 60))
+                    .foregroundStyle(contact.iconColor)
+            }
         }
-        .accessibilityLabel(contact.name)
+        .accessibilityLabel("Calling \(contact.name)")
         .onAppear {
             withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
                 isPulsing = true

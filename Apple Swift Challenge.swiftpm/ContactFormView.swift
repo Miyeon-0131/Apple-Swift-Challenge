@@ -17,8 +17,6 @@ struct ContactFormView: View {
     @State private var phoneNumber = ""
     @State private var relationship: FamilyRelationship = .daughter
     @State private var otherType: OtherContactType = .doctor
-    @State private var showDeleteConfirm = false
-    @State private var avatarItem: PhotosPickerItem?
     @State private var avatarImageData: Data?
 
     private var isFamily: Bool {
@@ -70,71 +68,34 @@ struct ContactFormView: View {
         ScrollView {
             VStack(spacing: 24) {
                 Text(title)
-                    .font(.system(size: 48, weight: .bold, design: .default))
+                    .font(.system(size: 56, weight: .bold, design: .default))
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                PhotosPicker(selection: $avatarItem, matching: .images) {
-                    VStack(spacing: 8) {
-                        ZStack {
-                            if let data = avatarImageData,
-                               let uiImage = UIImage(data: data) {
-                                Image(uiImage: uiImage)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 120, height: 120)
-                                    .clipShape(Circle())
-                                    .overlay(
-                                        Circle().stroke(Color.white, lineWidth: 3)
-                                    )
-                            } else {
-                                Circle()
-                                    .fill(Color(.tertiarySystemBackground))
-                                    .frame(width: 120, height: 120)
-                                    .overlay {
-                                        Image(systemName: "person.fill")
-                                            .font(.largeTitle)
-                                            .foregroundStyle(.secondary)
-                                    }
-                            }
-                        }
-
-                        Text(model.strings.choosePhotoButton)
-                            .font(.system(size: 32, weight: .regular, design: .default))
-                            .foregroundStyle(.blue)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .accessibilityLabel(model.strings.choosePhotoButton)
-                .onChange(of: avatarItem, initial: false) { _, newItem in
-                    guard let newItem else { return }
-                    Task { @MainActor in
-                        if let data = try? await newItem.loadTransferable(type: Data.self) {
-                            avatarImageData = data
-                        }
-                    }
-                }
+                AvatarView(avatarImageData: $avatarImageData)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(model.strings.nameField)
-                        .font(.system(size: 36, weight: .bold, design: .default))
+                        .font(.system(size: 42, weight: .bold, design: .default))
                     TextField(model.strings.nameField, text: $name)
-                        .font(.system(size: 32, weight: .regular, design: .default))
+                        .font(.system(size: 38, weight: .regular, design: .default))
                         .padding(16)
                         .background(Color(.secondarySystemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .onTapGesture { SpeechAssistant.shared.speak("Editing name") }
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(model.strings.phoneField)
-                        .font(.system(size: 36, weight: .bold, design: .default))
+                        .font(.system(size: 42, weight: .bold, design: .default))
                     HStack(spacing: 8) {
                         Text(model.phonePrefix)
-                            .font(.system(size: 32, weight: .bold, design: .default))
+                            .font(.system(size: 38, weight: .bold, design: .default))
                             .padding(.leading, 12)
                         Divider()
                         TextField(model.strings.phoneField, text: $phoneNumber)
-                            .font(.system(size: 32, weight: .regular, design: .default))
+                            .font(.system(size: 38, weight: .regular, design: .default))
                             .keyboardType(.phonePad)
+                            .onTapGesture { SpeechAssistant.shared.speak("Editing phone number") }
                     }
                     .padding(16)
                     .background(Color(.secondarySystemBackground))
@@ -152,16 +113,26 @@ struct ContactFormView: View {
                 if isFamily {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(model.strings.relationshipField)
-                            .font(.system(size: 36, weight: .bold, design: .default))
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 12) {
+                            .font(.system(size: 42, weight: .bold, design: .default))
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180))], spacing: 12) {
                             ForEach(FamilyRelationship.allCases.filter { $0 != .grandchild && $0 != .other }) { r in
-                                Button(action: { relationship = r }) {
-                                    Text(model.strings.displayName(for: r))
-                                        .font(.system(size: 30, weight: .bold, design: .default))
-                                        .padding(.horizontal, 16)
+                                Button(action: { 
+                                    SpeechAssistant.shared.speak(model.strings.displayName(for: r))
+                                    relationship = r 
+                                }) {
+                                    VStack(spacing: 4) {
+                                        Text(model.strings.emoji(for: r))
+                                            .font(.system(size: 30))
+                                        Text(model.strings.displayName(for: r))
+                                            .font(.callout.weight(.bold))
+                                            .lineLimit(1)
+                                            .allowsTightening(true)
+                                            .minimumScaleFactor(0.7)
+                                    }
+                                        .padding(.horizontal, 10)
                                         .padding(.vertical, 12)
                                         .frame(maxWidth: .infinity)
-                                        .background(relationship == r ? .orange : Color(.tertiarySystemBackground))
+                                        .background(relationship == r ? Color.orange : Color(.tertiarySystemBackground))
                                         .foregroundStyle(relationship == r ? .white : .primary)
                                         .clipShape(RoundedRectangle(cornerRadius: 12))
                                 }
@@ -172,16 +143,25 @@ struct ContactFormView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(model.strings.typeField)
-                            .font(.system(size: 36, weight: .bold, design: .default))
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 12) {
+                            .font(.system(size: 42, weight: .bold, design: .default))
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180))], spacing: 12) {
                             ForEach(OtherContactType.allCases.filter { $0 != .other }) { t in
-                                Button(action: { otherType = t }) {
-                                    Text(model.strings.displayName(for: t))
-                                        .font(.system(size: 30, weight: .bold, design: .default))
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 12)
+                                Button(action: { 
+                                    SpeechAssistant.shared.speak(model.strings.displayName(for: t))
+                                    otherType = t 
+                                }) {
+                                    VStack(spacing: 4) {
+                                        Text(model.strings.emoji(for: t))
+                                            .font(.system(size: 28))
+                                        Text(model.strings.displayName(for: t))
+                                            .font(.callout.weight(.bold))
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.7)
+                                    }
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 10)
                                         .frame(maxWidth: .infinity)
-                                        .background(otherType == t ? .blue : Color(.tertiarySystemBackground))
+                                        .background(otherType == t ? Color.blue : Color(.tertiarySystemBackground))
                                         .foregroundStyle(otherType == t ? .white : .primary)
                                         .clipShape(RoundedRectangle(cornerRadius: 12))
                                 }
@@ -193,7 +173,7 @@ struct ContactFormView: View {
 
                 Button(action: saveContact) {
                     Text(model.strings.saveButton)
-                        .font(.title).bold()
+                        .font(.system(size: 34, weight: .bold, design: .default))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 18)
                         .background(canSave ? .green : .gray)
@@ -203,9 +183,12 @@ struct ContactFormView: View {
                 .disabled(!canSave)
                 .accessibilityLabel(model.strings.saveButton)
 
-                Button(action: { withAnimation { model.showHome() } }) {
+                Button(action: { 
+                    SpeechAssistant.shared.speak("Cancelled, back to list")
+                    withAnimation { model.showHome() } 
+                }) {
                     Text(model.strings.cancelButton)
-                        .font(.title2)
+                        .font(.system(size: 28, weight: .regular, design: .default))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .background(Color(.secondarySystemBackground))
@@ -213,25 +196,20 @@ struct ContactFormView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .accessibilityLabel(model.strings.cancelButton)
-
-                if isEditing {
-                    Button(action: { showDeleteConfirm = true }) {
-                        Text(model.strings.deleteButton)
-                            .font(.title3)
-                            .foregroundStyle(.red)
-                    }
-                    .padding(.top, 16)
-                    .alert(model.strings.deleteButton, isPresented: $showDeleteConfirm) {
-                        Button(model.strings.cancelButton, role: .cancel) { }
-                        Button(model.strings.deleteButton, role: .destructive) { deleteContact() }
-                    }
-                }
             }
             .padding(32)
         }
-        .onAppear { loadExistingData() }
+        .onAppear { 
+            loadExistingData()
+            switch mode {
+            case .newFamily: SpeechAssistant.shared.speak("Add Family Contact form")
+            case .newOther: SpeechAssistant.shared.speak("Add Other Contact form")
+            case .edit: break
+            }
+        }
     }
 
+    @MainActor
     private func loadExistingData() {
         if case .edit(let contact) = mode {
             name = contact.name
@@ -239,17 +217,21 @@ struct ContactFormView: View {
             relationship = contact.relationship ?? .daughter
             otherType = contact.otherType ?? .doctor
             avatarImageData = contact.avatarImageData
+            SpeechAssistant.shared.speak("Editing contact \(contact.displayName)")
         }
     }
 
+    @MainActor
     private func saveContact() {
         switch mode {
         case .newFamily:
             let contact = Contact(id: UUID(), name: name, phoneNumber: phoneNumber, category: .family, relationship: relationship, otherType: nil, emergencyService: nil, avatarImageData: avatarImageData)
             model.addContact(contact)
+            SpeechAssistant.shared.speak("Saved contact \(name)")
         case .newOther:
             let contact = Contact(id: UUID(), name: name, phoneNumber: phoneNumber, category: .other, relationship: nil, otherType: otherType, emergencyService: nil, avatarImageData: avatarImageData)
             model.addContact(contact)
+            SpeechAssistant.shared.speak("Saved contact \(name)")
         case .edit(var contact):
             contact.name = name
             contact.phoneNumber = phoneNumber
@@ -260,13 +242,7 @@ struct ContactFormView: View {
             }
             contact.avatarImageData = avatarImageData
             model.updateContact(contact)
-        }
-        withAnimation { model.showHome() }
-    }
-
-    private func deleteContact() {
-        if case .edit(let contact) = mode {
-            model.deleteContact(contact)
+            SpeechAssistant.shared.speak("Updated contact \(name)")
         }
         withAnimation { model.showHome() }
     }
